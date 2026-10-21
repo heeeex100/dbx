@@ -1,4 +1,4 @@
-import { nextTick } from "vue";
+import { nextTick, ref } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { matchQuickOpenText, useQuickOpen } from "@/composables/useQuickOpen";
 import * as api from "@/lib/backend/api";
@@ -82,6 +82,44 @@ describe("useQuickOpen", () => {
       setQuery(".sql");
       expect(filteredItems.value.map((item) => item.label)).toContain("new.sql");
       expect(filteredItems.value.map((item) => item.label)).not.toContain("old.sql");
+    });
+  });
+
+  describe("metadata matching", () => {
+    it.each([
+      ["cordetxprep", "report-v2024-07-customer-order-detail-export.sql", "report-v2024-07-customer-order-detail-export.sql export order-reports"],
+      ["sper", "report.sql", "report.sql sales production export reports"],
+      ["salesprod", "report.sql", "report.sql sales production"],
+      ["zzj", "report.sql", "report.sql 总租金"],
+    ])("rejects non-literal metadata matches for %s", (query, label, searchText) => {
+      vi.mocked(useConnectionStore).mockReturnValue({ connections: [], treeNodes: [] } as any);
+      const { filteredItems, setQuery } = useQuickOpen({ extraItems: ref([{ id: "file", type: "sql_file", label, searchText, connectionId: "" }]) });
+      setQuery(query);
+      expect(filteredItems.value).toEqual([]);
+    });
+
+    it.each(["PRODUCTION", "duction", "  production  "])("preserves literal metadata search for %s below label matches", (query) => {
+      vi.mocked(useConnectionStore).mockReturnValue({ connections: [], treeNodes: [] } as any);
+      const { filteredItems, setQuery } = useQuickOpen({
+        extraItems: ref([
+          { id: "metadata", type: "sql_file", label: "report.sql", searchText: "Production reports", connectionId: "" },
+          { id: "label", type: "sql_file", label: "production.sql", searchText: "production.sql", connectionId: "" },
+        ]),
+      });
+      setQuery(query);
+      expect(filteredItems.value.map((item) => item.id)).toEqual(["label", "metadata"]);
+      expect(filteredItems.value[0].matchIndices.length).toBeGreaterThan(0);
+      expect(filteredItems.value[1].matchIndices).toEqual([]);
+      expect(filteredItems.value[1].matchScore).toBeGreaterThan(1000);
+    });
+
+    it("preserves fuzzy file-name matches and their highlights", () => {
+      vi.mocked(useConnectionStore).mockReturnValue({ connections: [], treeNodes: [] } as any);
+      const label = "report-v2024-07-customer-order-detail-export.sql";
+      const { filteredItems, setQuery } = useQuickOpen({ extraItems: ref([{ id: "file", type: "sql_file", label, searchText: `${label} export order-reports`, connectionId: "" }]) });
+      setQuery("cordetxp");
+      expect(filteredItems.value).toHaveLength(1);
+      expect(filteredItems.value[0].matchIndices.map((index) => label[index]).join("")).toBe("cordetxp");
     });
   });
 
